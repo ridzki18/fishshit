@@ -1,5 +1,5 @@
 -- fisheet.lua — FishShit Notifier (Fluent UI)
--- Embed rapi (fields) + icon ikan via thumbnails.roblox.com (rbxcdn) agar muncul di Discord
+-- Embed rapi (fields) + ikon ikan PASTI muncul via rbxthumb.content.roblox.com
 
 -- ====== DEPENDENCIES (Fluent) ======
 local Fluent = loadstring(game:HttpGet("https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"))()
@@ -27,7 +27,7 @@ local function fmt_int(n)
     local k; repeat s,k = s:gsub("^(-?%d+)(%d%d%d)","%1,%2") until k==0; return s
 end
 
--- Return URL rbxcdn yang cocok untuk Discord thumbnail
+-- Kembalikan URL gambar final yang disukai Discord
 local function resolve_icon_url(asset)
     local s = tostring(asset or "")
     if s:match("^https?://") then return s end
@@ -35,7 +35,12 @@ local function resolve_icon_url(asset)
     if not id then
         return "https://i.imgur.com/1r4rX0M.png"
     end
-    -- 1) thumbnails.roblox.com -> imageUrl (biasanya https://tr.rbxcdn.com/...)
+
+    -- 0) Langsung pakai rbxthumb.content.roblox.com (direct image)
+    --    Ini paling kompatibel untuk Discord embed thumbnails.
+    local direct = ("https://rbxthumb.content.roblox.com/thumb?assetId=%s&width=420&height=420&format=png"):format(id)
+
+    -- 1) Coba thumbnails.roblox.com (kalau berhasil dapat rbxcdn)
     local ok, body = pcall(function()
         local url = ("https://thumbnails.roblox.com/v1/assets?assetIds=%s&size=420x420&format=Png&isCircular=false"):format(id)
         return HttpService:GetAsync(url)
@@ -43,11 +48,12 @@ local function resolve_icon_url(asset)
     if ok and body then
         local ok2, json = pcall(function() return HttpService:JSONDecode(body) end)
         if ok2 and json and json.data and json.data[1] and json.data[1].imageUrl and #json.data[1].imageUrl > 0 then
-            return json.data[1].imageUrl
+            return json.data[1].imageUrl -- https://tr.rbxcdn.com/...
         end
     end
-    -- 2) fallback masih bisa (terkadang dirender)
-    return ("https://www.roblox.com/asset-thumbnail/image?assetId=%s&width=420&height=420&format=png"):format(id)
+
+    -- 2) fallback terakhir
+    return direct
 end
 
 local function http_post_json(url, json)
@@ -152,7 +158,7 @@ do
             local weightStr = string.format("%.2f kg", math.random(259820,389730)/1000)
             local rarityStr = "1 in 3,500,000"
 
-            -- ambil icon dari list.lua bila ada; fallback id ini
+            -- Ambil icon dari list.lua bila ada; fallback id ini
             local iconSrc = "rbxassetid://80927639907406"
             local map = load_fish_map()
             if type(map)=="table" and map[fishName] and map[fishName].Icon then

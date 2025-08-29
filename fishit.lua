@@ -1,121 +1,126 @@
---// Fish It Webhook Notifier + X2ZU Open Source UI
---// jalankan: loadstring(game:HttpGet("https://raw.githubusercontent.com/<username>/<repo>/main/fishit_x2zu.lua"))()
+-- GABRIEL • Discord Webhook Test (UI by x2zu, customized)
+-- Hanya 1 panel untuk test send. Title + logo diganti.
+-- Usage: isi webhook URL → klik "Test Send".
 
----------------- HTTP Compat ----------------
+-- ========= HTTP compat (executor) =========
 local http = (syn and syn.request) or http_request or request
-local function hasHttp() return typeof(http)=="function" end
+local function HAS_HTTP() return typeof(http) == "function" end
 local HttpService = game:GetService("HttpService")
-local RS = game:GetService("ReplicatedStorage")
 
----------------- Config ----------------
-local CFG = {
-    enable = false,
-    webhook = "",
-    discordUserId = "",
-    tiers = {Legendary=true, Mythic=true, SECRET=true},
-}
+-- ========= Load x2zu UI library =========
+local LIB_URL = "https://raw.githubusercontent.com/x2zu/OPEN-SOURCE-UI-ROBLOX/refs/heads/main/X2ZU%20UI%20ROBLOX%20OPEN%20SOURCE/ExampleNewUI.lua"
+local okLib, Library = pcall(function() return loadstring(game:HttpGet(LIB_URL))() end)
+if not okLib then
+    warn("[GABRIEL] gagal load UI library:", Library)
+    return
+end
 
----------------- Load UI Library ----------------
-local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/x2zu/OPEN-SOURCE-UI-ROBLOX/refs/heads/main/X2ZU%20UI%20ROBLOX%20OPEN%20SOURCE/ExampleNewUI.lua"))()
+-- ========= Create minimal window =========
+local Window = Library:CreateWindow("GABRIEL")   -- text di header (akan di-patch juga di bawah)
+-- Buat satu tab saja (namanya bebas, tidak tampil sebagai list banyak)
+local Tab = Window:CreateTab("Webhook")
 
-local Win = Library:CreateWindow("FishIt Webhook")
-local Main = Win:CreateTab("Main")
+-- ---- Patch tampilan (hapus menu default, ganti judul & logo) ----
+task.defer(function()
+    -- coba cari ScreenGui/Frame dari library, lalu modifikasi
+    local player = game:GetService("Players").LocalPlayer
+    local pg = player:WaitForChild("PlayerGui", 10)
+    if not pg then return end
 
----------------- UI Elements ----------------
-Main:CreateToggle("Enable Notifications", CFG.enable, function(val)
-    CFG.enable = val
+    local function isString(x) return typeof(x)=="string" end
+    local function deepPatch(gui)
+        for _,inst in ipairs(gui:GetDescendants()) do
+            -- Ganti judul "STELLAR x2zu Project" menjadi "GABRIEL"
+            if inst:IsA("TextLabel") or inst:IsA("TextButton") then
+                local t = inst.Text
+                if isString(t) then
+                    if t:lower():find("stellar") or t:lower():find("x2zu") then
+                        inst.Text = "GABRIEL"
+                    end
+                    -- sembunyikan item sidebar default
+                    local low = t:lower()
+                    if low == "information" or low=="main" or low=="farming" or low=="items"
+                        or low=="setting" or low=="local player" or low=="localplayer" then
+                        inst.Parent.Visible = false
+                        inst.Visible = false
+                    end
+                end
+            elseif inst:IsA("ImageLabel") then
+                -- ganti logo header kalau ada icon default
+                if (inst.Image and #inst.Image > 0) then
+                    -- heuristik: header icon sering di pojok; pokoknya set semua ImageLabel di header pertama
+                    inst.Image = "https://i.pinimg.com/736x/f8/ba/35/f8ba35d0f641058d208e2427af242e6c.jpg"
+                end
+            end
+        end
+    end
+    -- cari ScreenGui buatan library (biasanya 1 yang baru muncul)
+    for _,sg in ipairs(pg:GetChildren()) do
+        if sg:IsA("ScreenGui") then
+            pcall(deepPatch, sg)
+        end
+    end
 end)
 
-Main:CreateToggle("Notify Legendary", CFG.tiers.Legendary, function(val)
-    CFG.tiers.Legendary = val
-end)
-Main:CreateToggle("Notify Mythic", CFG.tiers.Mythic, function(val)
-    CFG.tiers.Mythic = val
-end)
-Main:CreateToggle("Notify SECRET", CFG.tiers.SECRET, function(val)
-    CFG.tiers.SECRET = val
+-- ========= Simple form controls =========
+local State = { webhook = "", userId = "" }
+
+Tab:CreateBox("Webhook URL", function(val)
+    State.webhook = val or ""
 end)
 
-Main:CreateBox("Webhook URL", function(val)
-    CFG.webhook = val
+Tab:CreateBox("Discord User ID (optional)", function(val)
+    State.userId = val or ""
 end)
 
-Main:CreateBox("Discord User ID", function(val)
-    CFG.discordUserId = val
-end)
+Tab:CreateButton("Test Send", function()
+    if not HAS_HTTP() then
+        Library:Notify("❌ Executor tidak support HTTP (syn.request/http_request).", 4)
+        warn("[GABRIEL] HTTP not available")
+        return
+    end
+    if State.webhook == "" then
+        Library:Notify("Masukkan Webhook URL dulu.", 3)
+        return
+    end
 
-Main:CreateButton("Test Send", function()
-    if not hasHttp() then return warn("executor tidak support http") end
-    if CFG.webhook=="" then return warn("isi webhook dulu") end
     local embed = {
-        title="Test Send ✅",
-        description="If you see this, webhook works!",
-        color=0x2ECC71,
-        timestamp=os.date("!%Y-%m-%dT%H:%M:%SZ"),
+        title = "Test Send ✅",
+        description = "If you see this, webhook works!",
+        color = 0x2ECC71,
+        thumbnail = { url = "https://i.pinimg.com/736x/f8/ba/35/f8ba35d0f641058d208e2427af242e6c.jpg" },
+        fields = {
+            { name = "Sample", value = "Blob Fish", inline = true },
+            { name = "Tier",   value = "Mythic",   inline = true },
+        },
+        timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ"),
+        footer = { text = "GABRIEL • test" },
     }
     local payload = {
-        username="Fish Notifier",
-        content=(CFG.discordUserId~="" and "<@"..CFG.discordUserId..">" or ""),
-        embeds={embed},
+        username = "Fish Notifier",
+        content = (State.userId ~= "" and ("<@"..State.userId..">") or ""),
+        embeds  = { embed },
     }
-    http({Url=CFG.webhook,Method="POST",Headers={["Content-Type"]="application/json"},Body=HttpService:JSONEncode(payload)})
-    print("[fishit] ✅ Test sent")
+
+    local ok, err = pcall(function()
+        http({
+            Url = State.webhook,
+            Method = "POST",
+            Headers = { ["Content-Type"] = "application/json" },
+            Body = HttpService:JSONEncode(payload),
+        })
+    end)
+
+    if ok then
+        Library:Notify("✅ Test terkirim ke Discord!", 4)
+        print("[GABRIEL] test sent")
+    else
+        Library:Notify("❌ Gagal kirim: "..tostring(err), 5)
+        warn("[GABRIEL] send failed:", err)
+    end
 end)
 
----------------- Tiers/Items lookup ----------------
-local TIERS_BY_INDEX={}
-do
-    local ok,tiers=pcall(function() return require(RS:WaitForChild("Tiers")) end)
-    if ok then for _,t in ipairs(tiers) do TIERS_BY_INDEX[t.Tier]=t end end
-end
-local function c3ToInt(c) return math.floor(c.R*255)*65536+math.floor(c.G*255)*256+math.floor(c.B*255) end
-local function firstColor(cs) return (typeof(cs)=="ColorSequence" and cs.Keypoints[1] and cs.Keypoints[1].Value) or cs or Color3.fromRGB(88,101,242) end
-local function lookupFish(name)
-    local f=RS:FindFirstChild("Items"); if not f then return{} end
-    local ms=f:FindFirstChild(name); if not (ms and ms:IsA("ModuleScript")) then return{} end
-    local ok,d=pcall(require,ms); if not ok then return{} end
-    local t=TIERS_BY_INDEX[d.Data and d.Data.Tier]; return {
-        sellPrice=d.SellPrice, icon=d.Data and d.Data.Icon or "",
-        tierName=t and t.Name or ("Tier "..tostring(d.Data.Tier)),
-        color=t and c3ToInt(firstColor(t.TierColor)) or 0x5865F2,
-    }
-end
+-- kosmetik kecil: info cara pakai
+Tab:CreateLabel("Isi Webhook URL → klik Test Send.")
 
----------------- Discord Sender ----------------
-local function sendCatch(pName,fName,weight,chanceN)
-    if CFG.webhook=="" or not CFG.enable then return end
-    local info=lookupFish(fName)
-    -- filter tier
-    if not CFG.tiers[info.tierName] then return end
-    local embed={
-        title=string.format("A high-tier fish was caught by %s!",pName or "Someone"),
-        color=info.color,thumbnail={url=info.icon},
-        fields={
-            {name="Fish Name",value=fName,inline=false},
-            {name="Weight",value=weight or "-",inline=true},
-            {name="Rarity",value=(chanceN>0 and "1 in "..chanceN or "-"),inline=true},
-            {name="Tier",value=info.tierName or "-",inline=true},
-            {name="Sell Price",value=info.sellPrice and tostring(info.sellPrice) or "-",inline=true},
-        },
-        timestamp=os.date("!%Y-%m-%dT%H:%M:%SZ"),
-    }
-    local payload={username="Fish Notifier",content=(CFG.discordUserId~="" and "<@"..CFG.discordUserId..">" or ""),embeds={embed}}
-    http({Url=CFG.webhook,Method="POST",Headers={["Content-Type"]="application/json"},Body=HttpService:JSONEncode(payload)})
-end
-
----------------- Chat Parser ----------------
-local ChatEvents=RS:FindFirstChild("DefaultChatSystemChatEvents")
-local OnMsg=ChatEvents and ChatEvents:FindFirstChild("OnMessageDoneFiltering")
-local PATTERN="%[Server%]%:%s*([%w_%-]+)%s+obtained an?%s+(.+)%s+%(([%d%.]+%a)%)%s+with a 1 in%s+([%d,%.KkMm]+)%s+chance"
-local function normalizeN(str) str=str:gsub(",",""); local k=str:match("^([%d%.]+)[Kk]$"); if k then return math.floor(tonumber(k)*1e3+0.5) end; local m=str:match("^([%d%.]+)[Mm]$"); if m then return math.floor(tonumber(m)*1e6+0.5) end; return tonumber(str) or 0 end
-if OnMsg then
-    OnMsg.OnClientEvent:Connect(function(d)
-        if not CFG.enable then return end
-        local who,f,w,n=d.Message:match(PATTERN)
-        if f then sendCatch(who,f,w,normalizeN(n)) end
-    end)
-else
-    warn("[fishit] Chat events not found; wait until DefaultChatSystemChatEvents exists.")
-end
-
-print("[fishit] Webhook notifier w/ X2ZU UI loaded. Isi Webhook URL, klik Test Send untuk debug, lalu ON-kan toggle.")
+print("[GABRIEL] UI siap. Ganti judul & logo sudah diterapkan. Isi webhook dan klik Test Send.")

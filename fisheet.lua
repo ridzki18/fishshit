@@ -1,5 +1,5 @@
 -- fisheet.lua — FishShit Notifier (Fluent UI)
--- Embed rapi (fields) + ikon ikan PASTI muncul via rbxthumb.content.roblox.com
+-- Embed rapi + ikon ikan pasti muncul via thumbnails.roblox.com => tr.rbxcdn.com
 
 -- ====== DEPENDENCIES (Fluent) ======
 local Fluent = loadstring(game:HttpGet("https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"))()
@@ -19,6 +19,7 @@ local Config = {
     UserID        = "905231281128898570",
     RetryAttempts = 5,
     RetryDelay    = 2,
+    FallbackIcon  = "https://i.imgur.com/1r4rX0M.png" -- jaga-jaga kalau API thumbnail gagal
 }
 
 -- ====== UTILS ======
@@ -27,33 +28,26 @@ local function fmt_int(n)
     local k; repeat s,k = s:gsub("^(-?%d+)(%d%d%d)","%1,%2") until k==0; return s
 end
 
--- Kembalikan URL gambar final yang disukai Discord
+-- Ambil URL gambar FINAL (tr.rbxcdn.com) dari thumbnails.roblox.com
 local function resolve_icon_url(asset)
     local s = tostring(asset or "")
     if s:match("^https?://") then return s end
     local id = s:match("rbxassetid://(%d+)") or s:match("(%d+)")
     if not id then
-        return "https://i.imgur.com/1r4rX0M.png"
+        return Config.FallbackIcon
     end
 
-    -- 0) Langsung pakai rbxthumb.content.roblox.com (direct image)
-    --    Ini paling kompatibel untuk Discord embed thumbnails.
-    local direct = ("https://rbxthumb.content.roblox.com/thumb?assetId=%s&width=420&height=420&format=png"):format(id)
-
-    -- 1) Coba thumbnails.roblox.com (kalau berhasil dapat rbxcdn)
     local ok, body = pcall(function()
         local url = ("https://thumbnails.roblox.com/v1/assets?assetIds=%s&size=420x420&format=Png&isCircular=false"):format(id)
         return HttpService:GetAsync(url)
     end)
     if ok and body then
         local ok2, json = pcall(function() return HttpService:JSONDecode(body) end)
-        if ok2 and json and json.data and json.data[1] and json.data[1].imageUrl and #json.data[1].imageUrl > 0 then
-            return json.data[1].imageUrl -- https://tr.rbxcdn.com/...
+        if ok2 and json and json.data and json.data[1] and type(json.data[1].imageUrl)=="string" and #json.data[1].imageUrl>0 then
+            return json.data[1].imageUrl -- contoh: https://tr.rbxcdn.com/<hash>/420/420/Image/Png
         end
     end
-
-    -- 2) fallback terakhir
-    return direct
+    return Config.FallbackIcon
 end
 
 local function http_post_json(url, json)
@@ -94,6 +88,7 @@ local function build_embed(args)
         title = ("A high-tier fish was caught by %s!"):format(args.playerName or "-"),
         color = color,
         thumbnail = { url = args.iconUrl or "" },
+        image     = { url = args.iconUrl or "" }, -- tampil besar juga, supaya pasti terlihat
         fields = {
             { name = "Fish Name 🐟", value = ("`%s`"):format(args.fishName or "-"), inline = false },
             { name = "Weight ⚖️",    value = ("`%s`"):format(args.weightStr or "-"), inline = true },
@@ -165,6 +160,9 @@ do
                 iconSrc = tostring(map[fishName].Icon)
             end
             local iconUrl = resolve_icon_url(iconSrc)
+
+            -- log url (untuk debug cepat di output)
+            print("[FishShit] Icon URL: ", iconUrl)
 
             local embed = build_embed({
                 playerName = LP.DisplayName or LP.Name,

@@ -1,5 +1,6 @@
 -- fisheet.lua — FishShit Notifier (Fluent UI)
--- Embed rapi + icon ikan via thumbnails.roblox.com (poll sampai Completed) + tombol debug
+-- Embed rapi + icon ikan: prefer HttpIcon/CDN (list.lua) → Roblox thumbnail (poll) → safe PNG fallback
+-- Tambah tombol "Debug Kraken Icon" utk lihat URL gambar yang dipakai
 
 -- ========= DEPENDENCIES (Fluent) =========
 local Fluent = loadstring(game:HttpGet("https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"))()
@@ -20,7 +21,8 @@ local Config = {
     UserID        = "905231281128898570",
     RetryAttempts = 5,
     RetryDelay    = 2,
-    FallbackIcon  = "https://i.imgur.com/1r4rX0M.png"
+    -- Fallback PNG yang stabil (bukan Imgur)
+    FallbackIcon  = "https://upload.wikimedia.org/wikipedia/commons/thumb/7/77/Emoji_u1f41f.svg/240px-Emoji_u1f41f.svg.png"
 }
 
 -- ========= UTILS =========
@@ -29,22 +31,37 @@ local function fmt_int(n)
     local k; repeat s,k = s:gsub("^(-?%d+)(%d%d%d)","%1,%2") until k==0; return s
 end
 
--- Poll thumbnails.roblox.com sampai state Completed → kembalikan URL tr.rbxcdn.com
-local function resolve_icon_url(asset)
-    local s = tostring(asset or "")
-    if s:match("^https?://") then
-        print("[Icon] Input already URL:", s)
-        return s
-    end
-    local id = s:match("rbxassetid://(%d+)") or s:match("(%d+)")
-    if not id then
-        warn("[Icon] Invalid asset:", s)
-        return Config.FallbackIcon
-    end
+-- Muat fish list (boleh diberi kolom HttpIcon/CDN = URL langsung)
+local FishMap
+local function load_fish_map()
+    if FishMap then return FishMap end
+    local ok,src = pcall(function() return game:HttpGet(FISH_LIST_URL) end)
+    if not ok or not src then FishMap = {}; return FishMap end
+    local chunk = loadstring(src)
+    local ok2,tbl = pcall(chunk)
+    FishMap = (ok2 and type(tbl)=="table") and tbl or {}
+    return FishMap
+end
 
-    local attempts, maxAttempts = 0, 10    -- total ~7 detik
+-- Coba ambil Icon dari Items module (fallback terakhir jika list.lua tak ada)
+local function get_game_module_icon(name)
+    local ok, mod = pcall(function()
+        local folder = ReplicatedStorage:FindFirstChild("Items")
+        return folder and folder:FindFirstChild(name)
+    end)
+    if not ok or not mod then return nil end
+    local ok2, data = pcall(function() return require(mod) end)
+    if not ok2 or not data then return nil end
+    local icon = (data.Data and data.Data.Icon) or data.Icon
+    return icon
+end
+
+-- Poll thumbnails.roblox.com → tr.rbxcdn.com (direct image)
+local function roblox_thumbnail_url(assetIdStr)
+    local id = tostring(assetIdStr or ""):match("(%d+)")
+    if not id then return nil end
+    local attempts, maxAttempts = 0, 10
     local delaySec = 0.7
-
     while attempts < maxAttempts do
         attempts += 1
         local ok, body = pcall(function()
@@ -53,7 +70,6 @@ local function resolve_icon_url(asset)
         end)
         if not ok then
             warn(("[Icon] API error (try %d/%d): %s"):format(attempts, maxAttempts, tostring(body)))
-            task.wait(delaySec)
         else
             local ok2, json = pcall(function() return HttpService:JSONDecode(body) end)
             if ok2 and json and json.data and json.data[1] then
@@ -63,19 +79,57 @@ local function resolve_icon_url(asset)
                 print(("[Icon] assetId=%s state=%s try=%d"):format(id, state, attempts))
                 if state == "Completed" and type(imageUrl) == "string" and #imageUrl > 0 then
                     print("[Icon] Completed →", imageUrl)
-                    return imageUrl -- https://tr.rbxcdn.com/.../420/420/Image/Png
+                    return imageUrl
                 elseif state == "Blocked" or state == "Error" then
-                    warn("[Icon] State "..state..", fallback image used.")
-                    return Config.FallbackIcon
+                    warn("[Icon] State "..state..", stop polling.")
+                    return nil
                 end
             else
                 warn(("[Icon] Decode error (try %d/%d)"):format(attempts, maxAttempts))
             end
-            task.wait(delaySec)
+        end
+        task.wait(delaySec)
+    end
+    return nil
+end
+
+-- Resolver utama: HttpIcon/CDN → Roblox thumbnail → fallback PNG
+local function resolve_icon_url(fishName, defaultAssetId)
+    -- 1) Cek list.lua
+    local map = load_fish_map()
+    local rec = map[fishName]
+    if type(rec) == "table" then
+        -- Kalau kamu tambahkan HttpIcon/CDN (URL langsung), pakai ini
+        if type(rec.HttpIcon) == "string" and rec.HttpIcon:match("^https?://") then
+            print("[Icon] Using HttpIcon from list.lua:", rec.HttpIcon)
+            return rec.HttpIcon
+        end
+        if type(rec.CDN) == "string" and rec.CDN:match("^https?://") then
+            print("[Icon] Using CDN from list.lua:", rec.CDN)
+            return rec.CDN
+        end
+        -- Kalau tidak ada URL langsung, ambil Icon id-nya
+        if type(rec.Icon) == "string" then
+            local url = roblox_thumbnail_url(rec.Icon)
+            if url then return url end
         end
     end
 
-    warn("[Icon] Timeout waiting thumbnail Completed, using fallback.")
+    -- 2) Coba dari Items module
+    local modIcon = get_game_module_icon(fishName)
+    if modIcon then
+        local url = roblox_thumbnail_url(modIcon)
+        if url then return url end
+    end
+
+    -- 3) Coba dari default asset id yang kamu kasih
+    if defaultAssetId then
+        local url = roblox_thumbnail_url(defaultAssetId)
+        if url then return url end
+    end
+
+    -- 4) Fallback aman
+    print("[Icon] Fallback PNG used:", Config.FallbackIcon)
     return Config.FallbackIcon
 end
 
@@ -90,18 +144,6 @@ local function http_post_json(url, json)
         local ok = pcall(function() HttpService:PostAsync(url, json, Enum.HttpContentType.ApplicationJson) end)
         return ok
     end
-end
-
--- ========= FISH LIST (opsional dari repo) =========
-local FishMap
-local function load_fish_map()
-    if FishMap then return FishMap end
-    local ok,src = pcall(function() return game:HttpGet(FISH_LIST_URL) end)
-    if not ok or not src then FishMap = {}; return FishMap end
-    local chunk = loadstring(src)
-    local ok2,tbl = pcall(chunk)
-    FishMap = (ok2 and type(tbl)=="table") and tbl or {}
-    return FishMap
 end
 
 -- ========= EMBED BUILDER (gaya contoh #2) =========
@@ -176,7 +218,6 @@ end
 do
     local StatusLabel = Tabs.Status:AddParagraph({ Title="System Status", Content="Ready." })
 
-    -- Test Webhook (Robot Kraken) — produksi
     Tabs.Status:AddButton({
         Title = " Test Webhook (Robot Kraken)",
         Description = "Send styled embed + show fish image",
@@ -189,12 +230,8 @@ do
             local weightStr = string.format("%.2f kg", math.random(259820,389730)/1000)
             local rarityStr = "1 in 3,500,000"
 
-            local iconSrc = "rbxassetid://80927639907406"
-            local map = load_fish_map()
-            if type(map)=="table" and map[fishName] and map[fishName].Icon then
-                iconSrc = tostring(map[fishName].Icon)
-            end
-            local iconUrl = resolve_icon_url(iconSrc)
+            -- PRIORITAS: HttpIcon/CDN → Roblox thumbnail → fallback
+            local iconUrl = resolve_icon_url(fishName, "80927639907406")
             print("[FishShit] Icon URL:", iconUrl)
 
             local embed = build_embed({
@@ -212,47 +249,30 @@ do
         end
     })
 
-    -- Tombol DEBUG: kirim embed yang memuat URL icon + logging polling states
+    -- DEBUG: kirim embed yang menampilkan URL ikon
     Tabs.Status:AddButton({
         Title = " Debug Kraken Icon",
-        Description = "Poll thumbnail API and send embed showing the resolved URL",
+        Description = "Resolve icon URL and send debug embed showing it",
         Callback = function()
-            local fishName  = "Robot Kraken"
-            local tier      = 7
-            local sellPrice = 327500
-            local weightStr = string.format("%.2f kg", math.random(259820,389730)/1000)
-            local rarityStr = "1 in 3,500,000"
-
-            local iconSrc = "rbxassetid://80927639907406"
-            local map = load_fish_map()
-            if type(map)=="table" and map[fishName] and map[fishName].Icon then
-                iconSrc = tostring(map[fishName].Icon)
-            end
-            local url = resolve_icon_url(iconSrc)
+            local fishName = "Robot Kraken"
+            local url = resolve_icon_url(fishName, "80927639907406")
             print("[Debug] Final icon URL:", url)
 
             local embed = {
-                title = ("[DEBUG] Icon %s"):format(fishName),
+                title = "[DEBUG] Icon "..fishName,
                 description = ("Resolved URL:\n`%s`"):format(url),
                 color = 0x00ffd5,
                 thumbnail = { url = url },
                 image     = { url = url },
-                fields = {
-                    { name = "Fish Name 🐟", value = ("`%s`"):format(fishName), inline = false },
-                    { name = "Weight ⚖️",    value = ("`%s`"):format(weightStr), inline = true },
-                    { name = "Rarity ✨",    value = ("`%s`"):format(rarityStr), inline = true },
-                    { name = "Tier 🏆",      value = ("`%s`"):format("SECRET"), inline = true },
-                    { name = "Sell Price 🪙",value = ("`%s`"):format(fmt_int(sellPrice)), inline = true },
-                },
                 footer = { text = "FishShit Notifier • Debug Thumbnail" },
                 timestamp = DateTime.now():ToIsoDate(),
             }
 
             local payload = {
-                username   = "FishShit Notifier",
+                username = "FishShit Notifier",
                 avatar_url = "https://i.imgur.com/9w3x9fN.png",
-                content    = (Config.UserID ~= "" and "<@"..Config.UserID..">") or nil,
-                embeds     = { embed },
+                content = (Config.UserID ~= "" and "<@"..Config.UserID..">") or nil,
+                embeds = { embed }
             }
             local body = HttpService:JSONEncode(payload)
             local ok
@@ -262,8 +282,7 @@ do
             else
                 ok = pcall(function() HttpService:PostAsync(Config.WebhookURL, body, Enum.HttpContentType.ApplicationJson) end)
             end
-
-            Fluent:Notify({ Title="Debug", Content= ok and "Sent with resolved icon URL." or "Failed to send debug embed.", Duration=4 })
+            Fluent:Notify({ Title="Debug", Content= ok and "Sent debug embed." or "Failed to send debug embed.", Duration=4 })
         end
     })
 

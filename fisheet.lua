@@ -1,8 +1,8 @@
 --[[
-   FishShit Notifier (v3, uses external fish list)
-   - Source of truth for fish Icon/Tier/Probability: list.lua (GitHub raw)
-   - Icon via Roblox Thumbnail API (works on Discord)
-   - Embed pills, pretty console log, draggable + minimize bubble
+   FishShit Notifier (v4, Fixed UI & Discord Output)
+   - Modern UI similar to ArcvourHUB style
+   - Discord webhook with proper fish icons and embed format
+   - Draggable interface with smooth animations
    - Test Webhook: Robot Kraken
 ]]--
 
@@ -43,8 +43,6 @@ local function asset_to_thumb_url(idOrStr, w, h)
     return ("https://www.roblox.com/asset-thumbnail/image?assetId=%s&width=%d&height=%d&format=png"):format(id, w, h)
 end
 
-local function pill(v) return ("`%s`"):format(tostring(v)) end
-
 local function http_post_json(url, json)
     if typeof(request) == "function" then
         local ok, res = pcall(function()
@@ -74,6 +72,16 @@ local Config = {
 }
 
 local TierNames = { [1]="Common", [2]="Uncommon", [3]="Rare", [4]="Epic", [5]="Legendary", [6]="Mythic", [7]="SECRET" }
+local TierColors = { 
+    [1] = Color3.fromRGB(155, 155, 155), -- Common - Gray
+    [2] = Color3.fromRGB(30, 255, 0),    -- Uncommon - Green  
+    [3] = Color3.fromRGB(0, 112, 255),   -- Rare - Blue
+    [4] = Color3.fromRGB(163, 53, 238),  -- Epic - Purple
+    [5] = Color3.fromRGB(255, 128, 0),   -- Legendary - Orange
+    [6] = Color3.fromRGB(255, 0, 0),     -- Mythic - Red
+    [7] = Color3.fromRGB(255, 215, 0)    -- SECRET - Gold
+}
+
 local function tier_name(n) return TierNames[tonumber(n) or n] or tostring(n) end
 
 -- =========================================================
@@ -140,11 +148,15 @@ end
 local function prob_to_rarity_str(p)
     if not p or p <= 0 then return nil end
     local x = math.max(1, math.floor(1/p + 0.5))
-    return "1 in "..fmt_int(x)
+    if x >= 1000 then
+        return "1 in "..string.format("%.0fK", x/1000)
+    else
+        return "1 in "..fmt_int(x)
+    end
 end
 
 -- =========================================================
---  UI
+--  MODERN UI (ArcvourHUB Style)
 -- =========================================================
 local GUI = {}
 do
@@ -154,276 +166,533 @@ do
     sg.ResetOnSpawn = false
     sg.Parent = parentUi
 
+    -- Main window with modern styling
     local win = Instance.new("Frame")
-    win.Size = UDim2.fromOffset(420, 520)
-    win.Position = UDim2.new(0.5, -210, 0.5, -260)
-    win.BackgroundColor3 = Color3.fromRGB(38,40,56)
+    win.Size = UDim2.fromOffset(380, 480)
+    win.Position = UDim2.new(0.5, -190, 0.5, -240)
+    win.BackgroundColor3 = Color3.fromRGB(24, 25, 39) -- Dark purple similar to ArcvourHUB
     win.BorderSizePixel = 0
     win.Parent = sg
-    Instance.new("UICorner", win).CornerRadius = UDim.new(0,14)
+    
+    local winCorner = Instance.new("UICorner", win)
+    winCorner.CornerRadius = UDim.new(0, 12)
+    
+    -- Add subtle border/shadow effect
+    local border = Instance.new("UIStroke", win)
+    border.Color = Color3.fromRGB(60, 65, 100)
+    border.Thickness = 1
+    border.Transparency = 0.7
 
-    local bar = Instance.new("Frame")
-    bar.Size = UDim2.new(1,0,0,56)
-    bar.BackgroundColor3 = Color3.fromRGB(54,57,79)
-    bar.BorderSizePixel = 0
-    bar.Parent = win
-    Instance.new("UICorner", bar).CornerRadius = UDim.new(0,14)
+    -- Header bar
+    local header = Instance.new("Frame")
+    header.Size = UDim2.new(1, 0, 0, 50)
+    header.BackgroundColor3 = Color3.fromRGB(30, 32, 50)
+    header.BorderSizePixel = 0
+    header.Parent = win
+    
+    local headerCorner = Instance.new("UICorner", header)
+    headerCorner.CornerRadius = UDim.new(0, 12)
+    
+    -- Fix header corners to only round top
+    local headerBottomCover = Instance.new("Frame")
+    headerBottomCover.Size = UDim2.new(1, 0, 0, 12)
+    headerBottomCover.Position = UDim2.new(0, 0, 1, -12)
+    headerBottomCover.BackgroundColor3 = Color3.fromRGB(30, 32, 50)
+    headerBottomCover.BorderSizePixel = 0
+    headerBottomCover.Parent = header
+
+    -- Title with icon
+    local titleIcon = Instance.new("TextLabel")
+    titleIcon.BackgroundTransparency = 1
+    titleIcon.Position = UDim2.fromOffset(15, 12)
+    titleIcon.Size = UDim2.fromOffset(26, 26)
+    titleIcon.Text = "🐟"
+    titleIcon.TextScaled = true
+    titleIcon.Font = Enum.Font.GothamBold
+    titleIcon.TextColor3 = Color3.fromRGB(120, 180, 255)
+    titleIcon.Parent = header
 
     local title = Instance.new("TextLabel")
     title.BackgroundTransparency = 1
-    title.Position = UDim2.fromOffset(16,0)
-    title.Size = UDim2.new(1,-120,1,0)
+    title.Position = UDim2.fromOffset(50, 0)
+    title.Size = UDim2.new(1, -130, 1, 0)
     title.TextXAlignment = Enum.TextXAlignment.Left
-    title.Text = "FishShit Notifier"
+    title.Text = "Fish!t"
     title.TextScaled = true
     title.Font = Enum.Font.GothamBold
-    title.TextColor3 = Color3.new(1,1,1)
-    title.Parent = bar
+    title.TextColor3 = Color3.new(1, 1, 1)
+    title.Parent = header
 
-    local mini = Instance.new("TextButton")
-    mini.Size = UDim2.fromOffset(28,28)
-    mini.Position = UDim2.new(1,-70,0,14)
-    mini.BackgroundColor3 = Color3.fromRGB(80,180,255)
-    mini.Text = "–"
-    mini.TextScaled = true
-    mini.Font = Enum.Font.GothamBold
-    mini.TextColor3 = Color3.new(1,1,1)
-    mini.Parent = bar
-    Instance.new("UICorner", mini).CornerRadius = UDim.new(0,8)
-
+    -- Close button (modern style)
     local close = Instance.new("TextButton")
-    close.Size = UDim2.fromOffset(28,28)
-    close.Position = UDim2.new(1,-36,0,14)
-    close.BackgroundColor3 = Color3.fromRGB(255,95,95)
-    close.Text = "✕"
+    close.Size = UDim2.fromOffset(24, 24)
+    close.Position = UDim2.new(1, -35, 0, 13)
+    close.BackgroundColor3 = Color3.fromRGB(255, 70, 70)
+    close.Text = "×"
     close.TextScaled = true
     close.Font = Enum.Font.GothamBold
-    close.TextColor3 = Color3.new(1,1,1)
-    close.Parent = bar
-    Instance.new("UICorner", close).CornerRadius = UDim.new(0,8)
+    close.TextColor3 = Color3.new(1, 1, 1)
+    close.Parent = header
+    
+    local closeCorner = Instance.new("UICorner", close)
+    closeCorner.CornerRadius = UDim.new(1, 0)
 
-    local y = 70
-    local function label(t)
+    -- Minimize button
+    local mini = Instance.new("TextButton")
+    mini.Size = UDim2.fromOffset(24, 24)
+    mini.Position = UDim2.new(1, -65, 0, 13)
+    mini.BackgroundColor3 = Color3.fromRGB(120, 180, 255)
+    mini.Text = "_"
+    mini.TextScaled = true
+    mini.Font = Enum.Font.GothamBold
+    mini.TextColor3 = Color3.new(1, 1, 1)
+    mini.Parent = header
+    
+    local miniCorner = Instance.new("UICorner", mini)
+    miniCorner.CornerRadius = UDim.new(1, 0)
+
+    -- Content area with scroll
+    local content = Instance.new("ScrollingFrame")
+    content.Size = UDim2.new(1, 0, 1, -50)
+    content.Position = UDim2.new(0, 0, 0, 50)
+    content.BackgroundTransparency = 1
+    content.BorderSizePixel = 0
+    content.ScrollBarThickness = 4
+    content.ScrollBarImageColor3 = Color3.fromRGB(120, 180, 255)
+    content.CanvasSize = UDim2.fromOffset(0, 500)
+    content.Parent = win
+
+    local y = 20
+    
+    -- Helper function to create labels
+    local function label(text, size)
+        size = size or 14
         local l = Instance.new("TextLabel")
         l.BackgroundTransparency = 1
-        l.Position = UDim2.fromOffset(16,y)
-        l.Size = UDim2.new(1,-32,0,22)
+        l.Position = UDim2.fromOffset(20, y)
+        l.Size = UDim2.new(1, -40, 0, 20)
         l.Font = Enum.Font.Gotham
-        l.TextSize = 14
+        l.TextSize = size
         l.TextXAlignment = Enum.TextXAlignment.Left
-        l.TextColor3 = Color3.fromRGB(210,210,220)
-        l.Text = t
-        l.Parent = win
+        l.TextColor3 = Color3.fromRGB(180, 185, 200)
+        l.Text = text
+        l.Parent = content
         y += 25
         return l
     end
-    local function textbox(ph)
+
+    -- Helper function to create textboxes
+    local function textbox(placeholder)
+        local container = Instance.new("Frame")
+        container.Position = UDim2.fromOffset(20, y)
+        container.Size = UDim2.new(1, -40, 0, 36)
+        container.BackgroundColor3 = Color3.fromRGB(35, 37, 56)
+        container.BorderSizePixel = 0
+        container.Parent = content
+        
+        local containerCorner = Instance.new("UICorner", container)
+        containerCorner.CornerRadius = UDim.new(0, 8)
+        
+        local containerStroke = Instance.new("UIStroke", container)
+        containerStroke.Color = Color3.fromRGB(55, 60, 85)
+        containerStroke.Thickness = 1
+        containerStroke.Transparency = 0.5
+
         local t = Instance.new("TextBox")
-        t.Position = UDim2.fromOffset(16,y)
-        t.Size = UDim2.new(1,-32,0,36)
-        t.BackgroundColor3 = Color3.fromRGB(30,32,46)
+        t.Size = UDim2.new(1, -20, 1, 0)
+        t.Position = UDim2.fromOffset(10, 0)
+        t.BackgroundTransparency = 1
         t.BorderSizePixel = 0
         t.Text = ""
-        t.PlaceholderText = ph
-        t.TextColor3 = Color3.new(1,1,1)
-        t.PlaceholderColor3 = Color3.fromRGB(160,160,170)
+        t.PlaceholderText = placeholder
+        t.TextColor3 = Color3.new(1, 1, 1)
+        t.PlaceholderColor3 = Color3.fromRGB(120, 125, 140)
         t.Font = Enum.Font.Gotham
         t.TextSize = 12
-        t.Parent = win
-        Instance.new("UICorner", t).CornerRadius = UDim.new(0,8)
+        t.TextXAlignment = Enum.TextXAlignment.Left
+        t.Parent = container
+        
+        -- Focus animations
+        t.Focused:Connect(function()
+            TweenService:Create(containerStroke, TweenInfo.new(0.2), {
+                Color = Color3.fromRGB(120, 180, 255),
+                Transparency = 0
+            }):Play()
+        end)
+        
+        t.FocusLost:Connect(function()
+            TweenService:Create(containerStroke, TweenInfo.new(0.2), {
+                Color = Color3.fromRGB(55, 60, 85),
+                Transparency = 0.5
+            }):Play()
+        end)
+        
         y += 46
         return t
     end
 
-    label("Discord Webhook URL"); local tbWebhook = textbox("Enter your Discord webhook URL...")
-    label("Discord User ID (Optional)"); local tbUserId = textbox("Enter your Discord User ID...")
+    -- Webhook URL input
+    label("Discord Webhook URL")
+    local tbWebhook = textbox("Enter your Discord webhook URL...")
 
+    -- User ID input  
+    label("Discord User ID (Optional)")
+    local tbUserId = textbox("Enter your Discord User ID...")
+
+    -- Tier selector
     label("Select Tiers to Notify")
-    local dd = Instance.new("Frame")
-    dd.Position = UDim2.fromOffset(16,y)
-    dd.Size = UDim2.new(1,-32,0,36)
-    dd.BackgroundColor3 = Color3.fromRGB(30,32,46)
-    dd.BorderSizePixel = 0
-    dd.Parent = win
-    Instance.new("UICorner", dd).CornerRadius = UDim.new(0,8)
-    y += 46
+    label("(None = All Legendary+)", 12)
+    
+    local tierFrame = Instance.new("Frame")
+    tierFrame.Position = UDim2.fromOffset(20, y)
+    tierFrame.Size = UDim2.new(1, -40, 0, 36)
+    tierFrame.BackgroundColor3 = Color3.fromRGB(35, 37, 56)
+    tierFrame.BorderSizePixel = 0
+    tierFrame.Parent = content
+    
+    local tierCorner = Instance.new("UICorner", tierFrame)
+    tierCorner.CornerRadius = UDim.new(0, 8)
+    
+    local tierStroke = Instance.new("UIStroke", tierFrame)
+    tierStroke.Color = Color3.fromRGB(55, 60, 85)
+    tierStroke.Thickness = 1
+    tierStroke.Transparency = 0.5
 
-    local ddText = Instance.new("TextLabel")
-    ddText.BackgroundTransparency = 1
-    ddText.Size = UDim2.new(1,-26,1,0)
-    ddText.Position = UDim2.fromOffset(10,0)
-    ddText.TextXAlignment = Enum.TextXAlignment.Left
-    ddText.Font = Enum.Font.Gotham
-    ddText.TextSize = 12
-    ddText.TextColor3 = Color3.new(1,1,1)
-    ddText.Text = "Legendary + Mythic + SECRET"
-    ddText.Parent = dd
+    local tierText = Instance.new("TextLabel")
+    tierText.BackgroundTransparency = 1
+    tierText.Size = UDim2.new(1, -35, 1, 0)
+    tierText.Position = UDim2.fromOffset(12, 0)
+    tierText.TextXAlignment = Enum.TextXAlignment.Left
+    tierText.Font = Enum.Font.Gotham
+    tierText.TextSize = 12
+    tierText.TextColor3 = Color3.new(1, 1, 1)
+    tierText.Text = "Legendary + Mythic + SECRET"
+    tierText.Parent = tierFrame
 
-    local ddArrow = Instance.new("TextLabel")
-    ddArrow.BackgroundTransparency = 1
-    ddArrow.Size = UDim2.fromOffset(18,36)
-    ddArrow.Position = UDim2.new(1,-22,0,0)
-    ddArrow.Text = "▼"
-    ddArrow.Font = Enum.Font.Gotham
-    ddArrow.TextSize = 12
-    ddArrow.TextColor3 = Color3.fromRGB(200,200,210)
-    ddArrow.Parent = dd
+    local tierArrow = Instance.new("TextLabel")
+    tierArrow.BackgroundTransparency = 1
+    tierArrow.Size = UDim2.fromOffset(20, 36)
+    tierArrow.Position = UDim2.new(1, -25, 0, 0)
+    tierArrow.Text = "▼"
+    tierArrow.Font = Enum.Font.Gotham
+    tierArrow.TextSize = 10
+    tierArrow.TextColor3 = Color3.fromRGB(180, 185, 200)
+    tierArrow.Parent = tierFrame
 
-    local ddList = Instance.new("Frame")
-    ddList.Visible = false
-    ddList.Position = UDim2.new(0,0,1,6)
-    ddList.Size = UDim2.new(1,0,0,120)
-    ddList.BackgroundColor3 = Color3.fromRGB(30,32,46)
-    ddList.BorderSizePixel = 0
-    ddList.Parent = dd
-    Instance.new("UICorner", ddList).CornerRadius = UDim.new(0,8)
+    local dropdown = Instance.new("Frame")
+    dropdown.Visible = false
+    dropdown.Position = UDim2.new(0, 0, 1, 4)
+    dropdown.Size = UDim2.new(1, 0, 0, 140)
+    dropdown.BackgroundColor3 = Color3.fromRGB(35, 37, 56)
+    dropdown.BorderSizePixel = 0
+    dropdown.ZIndex = 10
+    dropdown.Parent = tierFrame
+    
+    local dropCorner = Instance.new("UICorner", dropdown)
+    dropCorner.CornerRadius = UDim.new(0, 8)
+    
+    local dropStroke = Instance.new("UIStroke", dropdown)
+    dropStroke.Color = Color3.fromRGB(55, 60, 85)
+    dropStroke.Thickness = 1
+    dropStroke.Transparency = 0.5
 
     local options = {
-        {"Legendary Only", {5}},
-        {"Mythic Only",    {6}},
-        {"SECRET Only",    {7}},
+        {"Mythic Only", {6}},
+        {"SECRET Only", {7}},
+        {"Legendary + Mythic", {5,6}},
         {"Legendary + Mythic + SECRET", {5,6,7}}
     }
-    for i,opt in ipairs(options) do
-        local b = Instance.new("TextButton")
-        b.Size = UDim2.new(1,-10,0,24)
-        b.Position = UDim2.fromOffset(5,(i-1)*28+6)
-        b.BackgroundColor3 = Color3.fromRGB(45,48,66)
-        b.BorderSizePixel = 0
-        b.TextXAlignment = Enum.TextXAlignment.Left
-        b.Text = "  "..opt[1]
-        b.Font = Enum.Font.Gotham
-        b.TextSize = 12
-        b.TextColor3 = Color3.new(1,1,1)
-        b.Parent = ddList
-        Instance.new("UICorner", b).CornerRadius = UDim.new(0,6)
-        b.MouseButton1Click:Connect(function()
-            Config.SelectedTiers = opt[2]; ddText.Text = opt[1]; ddList.Visible = false
+    
+    for i, opt in ipairs(options) do
+        local btn = Instance.new("TextButton")
+        btn.Size = UDim2.new(1, -8, 0, 28)
+        btn.Position = UDim2.fromOffset(4, (i-1)*32 + 6)
+        btn.BackgroundColor3 = Color3.fromRGB(40, 42, 65)
+        btn.BorderSizePixel = 0
+        btn.TextXAlignment = Enum.TextXAlignment.Left
+        btn.Text = "   "..opt[1]
+        btn.Font = Enum.Font.Gotham
+        btn.TextSize = 11
+        btn.TextColor3 = Color3.new(1, 1, 1)
+        btn.Parent = dropdown
+        
+        local btnCorner = Instance.new("UICorner", btn)
+        btnCorner.CornerRadius = UDim.new(0, 6)
+        
+        -- Hover effect
+        btn.MouseEnter:Connect(function()
+            TweenService:Create(btn, TweenInfo.new(0.15), {
+                BackgroundColor3 = Color3.fromRGB(50, 55, 80)
+            }):Play()
+        end)
+        
+        btn.MouseLeave:Connect(function()
+            TweenService:Create(btn, TweenInfo.new(0.15), {
+                BackgroundColor3 = Color3.fromRGB(40, 42, 65)
+            }):Play()
+        end)
+        
+        btn.MouseButton1Click:Connect(function()
+            Config.SelectedTiers = opt[2]
+            tierText.Text = opt[1]
+            dropdown.Visible = false
+            TweenService:Create(tierArrow, TweenInfo.new(0.2), {Rotation = 0}):Play()
         end)
     end
-    local ddBtn = Instance.new("TextButton", dd)
-    ddBtn.BackgroundTransparency = 1; ddBtn.Size = UDim2.fromScale(1,1); ddBtn.Text = ""
-    ddBtn.MouseButton1Click:Connect(function() ddList.Visible = not ddList.Visible end)
 
+    local tierBtn = Instance.new("TextButton")
+    tierBtn.BackgroundTransparency = 1
+    tierBtn.Size = UDim2.fromScale(1, 1)
+    tierBtn.Text = ""
+    tierBtn.Parent = tierFrame
+    
+    tierBtn.MouseButton1Click:Connect(function()
+        dropdown.Visible = not dropdown.Visible
+        local rotation = dropdown.Visible and 180 or 0
+        TweenService:Create(tierArrow, TweenInfo.new(0.2), {Rotation = rotation}):Play()
+    end)
+
+    y += 50
+
+    -- Toggle switch for notifications
     label("Enable Fish Catch Notifications")
-    local toggle = Instance.new("Frame")
-    toggle.Position = UDim2.fromOffset(16,y)
-    toggle.Size = UDim2.fromOffset(64,30)
-    toggle.BackgroundColor3 = Color3.fromRGB(110,110,120)
-    toggle.BorderSizePixel = 0
-    toggle.Parent = win
-    Instance.new("UICorner", toggle).CornerRadius = UDim.new(0,16)
+    
+    local toggleFrame = Instance.new("Frame")
+    toggleFrame.Position = UDim2.fromOffset(20, y)
+    toggleFrame.Size = UDim2.fromOffset(60, 28)
+    toggleFrame.BackgroundColor3 = Color3.fromRGB(120, 180, 255)
+    toggleFrame.BorderSizePixel = 0
+    toggleFrame.Parent = content
+    
+    local toggleCorner = Instance.new("UICorner", toggleFrame)
+    toggleCorner.CornerRadius = UDim.new(0, 14)
 
-    local knob = Instance.new("Frame")
-    knob.Size = UDim2.fromOffset(26,26)
-    knob.Position = UDim2.fromOffset(2,2)
-    knob.BackgroundColor3 = Color3.new(1,1,1)
-    knob.BorderSizePixel = 0
-    knob.Parent = toggle
-    Instance.new("UICorner", knob).CornerRadius = UDim.new(0,13)
+    local toggleKnob = Instance.new("Frame")
+    toggleKnob.Size = UDim2.fromOffset(22, 22)
+    toggleKnob.Position = UDim2.fromOffset(32, 3)
+    toggleKnob.BackgroundColor3 = Color3.new(1, 1, 1)
+    toggleKnob.BorderSizePixel = 0
+    toggleKnob.Parent = toggleFrame
+    
+    local knobCorner = Instance.new("UICorner", toggleKnob)
+    knobCorner.CornerRadius = UDim.new(1, 0)
 
-    y += 46
-    local status = Instance.new("TextLabel")
-    status.BackgroundTransparency = 1
-    status.Position = UDim2.fromOffset(16,y-6)
-    status.Size = UDim2.new(1,-32,0,22)
-    status.Font = Enum.Font.Gotham
-    status.TextSize = 12
-    status.TextXAlignment = Enum.TextXAlignment.Left
-    status.Text = "Status: Active - Monitoring chat..."
-    status.TextColor3 = Color3.fromRGB(110,255,140)
-    status.Parent = win
+    y += 50
 
+    -- Advanced Settings section (like image 4)
+    label("Advanced Settings (Optional)", 16)
+    y += 10
+    
+    -- Custom Webhook URL (optional override)
+    label("Custom Webhook URL", 12)
+    label("(Optional)", 10)
+    local tbCustomWebhook = textbox("Enter your own Discord webhook...")
+    
+    y += 20
+
+    -- Status indicator
+    local statusLabel = Instance.new("TextLabel")
+    statusLabel.BackgroundTransparency = 1
+    statusLabel.Position = UDim2.fromOffset(20, y)
+    statusLabel.Size = UDim2.new(1, -40, 0, 22)
+    statusLabel.Font = Enum.Font.Gotham
+    statusLabel.TextSize = 12
+    statusLabel.TextXAlignment = Enum.TextXAlignment.Left
+    statusLabel.Text = "Status: Webhook sent successfully!"
+    statusLabel.TextColor3 = Color3.fromRGB(110, 255, 140)
+    statusLabel.Parent = content
+
+    y += 35
+
+    -- Test webhook button
     local testBtn = Instance.new("TextButton")
-    testBtn.Size = UDim2.new(1,-32,0,42)
-    testBtn.Position = UDim2.fromOffset(16,y+24)
-    testBtn.BackgroundColor3 = Color3.fromRGB(95,135,255)
+    testBtn.Size = UDim2.new(1, -40, 0, 40)
+    testBtn.Position = UDim2.fromOffset(20, y)
+    testBtn.BackgroundColor3 = Color3.fromRGB(120, 180, 255)
     testBtn.BorderSizePixel = 0
     testBtn.Text = "Test Webhook (Robot Kraken)"
-    testBtn.TextColor3 = Color3.new(1,1,1)
+    testBtn.TextColor3 = Color3.new(1, 1, 1)
     testBtn.Font = Enum.Font.GothamBold
-    testBtn.TextSize = 14
-    testBtn.Parent = win
-    Instance.new("UICorner", testBtn).CornerRadius = UDim.new(0,8)
+    testBtn.TextSize = 13
+    testBtn.Parent = content
+    
+    local btnCorner = Instance.new("UICorner", testBtn)
+    btnCorner.CornerRadius = UDim.new(0, 8)
+    
+    -- Button hover effects
+    testBtn.MouseEnter:Connect(function()
+        TweenService:Create(testBtn, TweenInfo.new(0.15), {
+            BackgroundColor3 = Color3.fromRGB(140, 200, 255)
+        }):Play()
+    end)
+    
+    testBtn.MouseLeave:Connect(function()
+        TweenService:Create(testBtn, TweenInfo.new(0.15), {
+            BackgroundColor3 = Color3.fromRGB(120, 180, 255)
+        }):Play()
+    end)
 
-    -- bubble
+    -- Bubble (minimized state)
     local bubble = Instance.new("TextButton")
     bubble.Visible = false
-    bubble.Size = UDim2.fromOffset(56,56)
-    bubble.Position = UDim2.new(0.5,-28,0.2,0)
-    bubble.BackgroundColor3 = Color3.fromRGB(54,57,79)
+    bubble.Size = UDim2.fromOffset(50, 50)
+    bubble.Position = UDim2.new(0.5, -25, 0.2, 0)
+    bubble.BackgroundColor3 = Color3.fromRGB(30, 32, 50)
     bubble.Text = "🐟"
     bubble.TextScaled = true
     bubble.Font = Enum.Font.GothamBold
-    bubble.TextColor3 = Color3.new(1,1,1)
+    bubble.TextColor3 = Color3.fromRGB(120, 180, 255)
     bubble.Parent = sg
-    Instance.new("UICorner", bubble).CornerRadius = UDim.new(1,0)
+    
+    local bubbleCorner = Instance.new("UICorner", bubble)
+    bubbleCorner.CornerRadius = UDim.new(1, 0)
+    
+    local bubbleStroke = Instance.new("UIStroke", bubble)
+    bubbleStroke.Color = Color3.fromRGB(120, 180, 255)
+    bubbleStroke.Thickness = 2
 
-    tbWebhook.FocusLost:Connect(function() Config.WebhookURL = tbWebhook.Text end)
-    tbUserId.FocusLost:Connect(function() Config.UserID = tbUserId.Text end)
+    -- Event handlers
+    tbWebhook.FocusLost:Connect(function() 
+        Config.WebhookURL = tbWebhook.Text 
+    end)
+    tbUserId.FocusLost:Connect(function() 
+        Config.UserID = tbUserId.Text 
+    end)
+    tbCustomWebhook.FocusLost:Connect(function()
+        if tbCustomWebhook.Text ~= "" then
+            Config.WebhookURL = tbCustomWebhook.Text
+        end
+    end)
 
-    local function setEnabled(on)
-        Config.Enabled = on
-        if on then
-            toggle.BackgroundColor3 = Color3.fromRGB(90,205,120)
-            TweenService:Create(knob, TweenInfo.new(0.25), {Position = UDim2.fromOffset(36,2)}):Play()
-            status.Text = "Status: Active - Monitoring chat..."
-            status.TextColor3 = Color3.fromRGB(110,255,140)
+    local function setEnabled(enabled)
+        Config.Enabled = enabled
+        if enabled then
+            TweenService:Create(toggleFrame, TweenInfo.new(0.3), {
+                BackgroundColor3 = Color3.fromRGB(120, 180, 255)
+            }):Play()
+            TweenService:Create(toggleKnob, TweenInfo.new(0.3), {
+                Position = UDim2.fromOffset(32, 3)
+            }):Play()
+            statusLabel.Text = "Status: Active - Monitoring chat..."
+            statusLabel.TextColor3 = Color3.fromRGB(110, 255, 140)
         else
-            toggle.BackgroundColor3 = Color3.fromRGB(110,110,120)
-            TweenService:Create(knob, TweenInfo.new(0.25), {Position = UDim2.fromOffset(2,2)}):Play()
-            status.Text = "Status: Disabled"
-            status.TextColor3 = Color3.fromRGB(255,120,120)
+            TweenService:Create(toggleFrame, TweenInfo.new(0.3), {
+                BackgroundColor3 = Color3.fromRGB(80, 85, 100)
+            }):Play()
+            TweenService:Create(toggleKnob, TweenInfo.new(0.3), {
+                Position = UDim2.fromOffset(6, 3)
+            }):Play()
+            statusLabel.Text = "Status: Disabled"
+            statusLabel.TextColor3 = Color3.fromRGB(255, 120, 120)
         end
     end
+    
     setEnabled(true)
 
-    local tBtn = Instance.new("TextButton", toggle)
-    tBtn.BackgroundTransparency = 1; tBtn.Size = UDim2.fromScale(1,1); tBtn.Text = ""
-    tBtn.MouseButton1Click:Connect(function() setEnabled(not Config.Enabled) end)
+    local toggleBtn = Instance.new("TextButton")
+    toggleBtn.BackgroundTransparency = 1
+    toggleBtn.Size = UDim2.fromScale(1, 1)
+    toggleBtn.Text = ""
+    toggleBtn.Parent = toggleFrame
+    
+    toggleBtn.MouseButton1Click:Connect(function()
+        setEnabled(not Config.Enabled)
+    end)
 
-    close.MouseButton1Click:Connect(function() sg:Destroy() end)
-    local function minimize(toBubble) win.Visible = not toBubble; bubble.Visible = toBubble end
+    close.MouseButton1Click:Connect(function() 
+        TweenService:Create(win, TweenInfo.new(0.3, Enum.EasingStyle.Back), {
+            Size = UDim2.fromOffset(0, 0)
+        }):Play()
+        wait(0.3)
+        sg:Destroy() 
+    end)
+    
+    local function minimize(toBubble)
+        if toBubble then
+            TweenService:Create(win, TweenInfo.new(0.3, Enum.EasingStyle.Back), {
+                Size = UDim2.fromOffset(0, 0)
+            }):Play()
+            wait(0.3)
+            win.Visible = false
+            bubble.Visible = true
+            TweenService:Create(bubble, TweenInfo.new(0.3, Enum.EasingStyle.Back), {
+                Size = UDim2.fromOffset(50, 50)
+            }):Play()
+        else
+            TweenService:Create(bubble, TweenInfo.new(0.2), {
+                Size = UDim2.fromOffset(0, 0)
+            }):Play()
+            wait(0.2)
+            bubble.Visible = false
+            win.Visible = true
+            TweenService:Create(win, TweenInfo.new(0.3, Enum.EasingStyle.Back), {
+                Size = UDim2.fromOffset(380, 480)
+            }):Play()
+        end
+    end
+    
     mini.MouseButton1Click:Connect(function() minimize(true) end)
     bubble.MouseButton1Click:Connect(function() minimize(false) end)
 
-    -- drag window
+    -- Smooth dragging for main window
     local dragging, dragStart, startPos
-    bar.InputBegan:Connect(function(i)
-        if i.UserInputType == Enum.UserInputType.MouseButton1 then
-            dragging = true; dragStart = i.Position; startPos = win.Position
+    header.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            dragging = true
+            dragStart = input.Position
+            startPos = win.Position
         end
-    end)
-    UserInputService.InputChanged:Connect(function(i)
-        if dragging and i.UserInputType == Enum.UserInputType.MouseMovement then
-            local d = i.Position - dragStart
-            win.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + d.X, startPos.Y.Scale, startPos.Y.Offset + d.Y)
-        end
-    end)
-    UserInputService.InputEnded:Connect(function(i)
-        if i.UserInputType == Enum.UserInputType.MouseButton1 then dragging = false end
     end)
 
-    -- drag bubble
-    local bdrag, bStart, bPos
-    bubble.InputBegan:Connect(function(i)
-        if i.UserInputType == Enum.UserInputType.MouseButton1 then
-            bdrag = true; bStart = i.Position; bPos = bubble.Position
+    UserInputService.InputChanged:Connect(function(input)
+        if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
+            local delta = input.Position - dragStart
+            win.Position = UDim2.new(
+                startPos.X.Scale, 
+                startPos.X.Offset + delta.X, 
+                startPos.Y.Scale, 
+                startPos.Y.Offset + delta.Y
+            )
         end
     end)
-    UserInputService.InputChanged:Connect(function(i)
-        if bdrag and i.UserInputType == Enum.UserInputType.MouseMovement then
-            local d = i.Position - bStart
-            bubble.Position = UDim2.new(bPos.X.Scale, bPos.X.Offset + d.X, bPos.Y.Scale, bPos.Y.Offset + d.Y)
+
+    UserInputService.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            dragging = false
         end
     end)
-    UserInputService.InputEnded:Connect(function(i)
-        if i.UserInputType == Enum.UserInputType.MouseButton1 then bdrag = false end
+
+    -- Smooth dragging for bubble
+    local bubbleDragging, bubbleDragStart, bubbleStartPos
+    bubble.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            bubbleDragging = true
+            bubbleDragStart = input.Position
+            bubbleStartPos = bubble.Position
+        end
+    end)
+
+    UserInputService.InputChanged:Connect(function(input)
+        if bubbleDragging and input.UserInputType == Enum.UserInputType.MouseMovement then
+            local delta = input.Position - bubbleDragStart
+            bubble.Position = UDim2.new(
+                bubbleStartPos.X.Scale, 
+                bubbleStartPos.X.Offset + delta.X, 
+                bubbleStartPos.Y.Scale, 
+                bubbleStartPos.Y.Offset + delta.Y
+            )
+        end
+    end)
+
+    UserInputService.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            bubbleDragging = false
+        end
     end)
 
     GUI.ScreenGui  = sg
     GUI.Window     = win
-    GUI.Status     = status
+    GUI.Status     = statusLabel
     GUI.TestButton = testBtn
 end
 
@@ -450,46 +719,103 @@ local function console_box(info)
 end
 
 -- =========================================================
---  WEBHOOK
+--  ENHANCED DISCORD WEBHOOK (Like Image 3)
 -- =========================================================
-local function build_embed(data)
-    local fields = {
-        {name = "Fish Name 🐟", value = "**"..data.fishName.."**", inline = false},
-        {name = "Weight ⚖️",   value = pill(data.weightStr), inline = true},
-        {name = "Rarity ✨",    value = pill(data.rarityStr), inline = true},
-        {name = "Tier 🏆",      value = pill(tier_name(data.tierNumber)), inline = true},
-        {name = "Sell Price 🪙",value = pill(fmt_int(data.sellPrice)), inline = true},
+local function build_discord_embed(data)
+    -- Get fish icon URL from the fish data
+    local fishIconUrl = asset_to_thumb_url(data.fishIcon)
+    
+    -- Create compact embed similar to image 3
+    local embed = {
+        color = 0x1ABC9C, -- Teal color like in image 3
+        thumbnail = {
+            url = fishIconUrl
+        },
+        fields = {
+            {
+                name = "Fish Name 🐟",
+                value = "**" .. data.fishName .. "**",
+                inline = false
+            },
+            {
+                name = "Weight ⚖️",
+                value = data.weightStr,
+                inline = true
+            },
+            {
+                name = "Rarity ✨",
+                value = data.rarityStr,
+                inline = true
+            },
+            {
+                name = "Tier 🏆",
+                value = tier_name(data.tierNumber),
+                inline = true
+            },
+            {
+                name = "Sell Price 🪙",
+                value = fmt_int(data.sellPrice),
+                inline = true
+            }
+        },
+        footer = {
+            text = "ArcvourHUB Notifier • Today at " .. os.date("%H:%M")
+        }
     }
-    if data.totalCaught then table.insert(fields, {name="Total Caught 🐟", value=pill(fmt_int(data.totalCaught)), inline=true}) end
-    if data.bagSize    then table.insert(fields, {name="Bag Size 🧺",     value=pill(data.bagSize), inline=true}) end
-    return {
-        title      = ("A high-tier fish was caught by %s!"):format(data.playerName),
-        color      = 0x20C997,
-        fields     = fields,
-        thumbnail  = { url = data.iconUrl },
-        footer     = { text = "FishShit Notifier • "..os.date("%X") },
-    }
+    
+    -- Add optional stats fields if available
+    if data.totalCaught then
+        table.insert(embed.fields, {
+            name = "Total Caught 🐟", 
+            value = fmt_int(data.totalCaught), 
+            inline = true
+        })
+    end
+    
+    if data.bagSize then
+        table.insert(embed.fields, {
+            name = "Bag Size 🧺", 
+            value = data.bagSize, 
+            inline = true
+        })
+    end
+    
+    return embed
 end
 
 local function send_webhook(embedData)
-    if Config.WebhookURL == "" then
+    local webhookUrl = Config.WebhookURL
+    if webhookUrl == "" then
         GUI.Status.Text = "Status: Error - Webhook URL empty"
-        GUI.Status.TextColor3 = Color3.fromRGB(255,120,120)
+        GUI.Status.TextColor3 = Color3.fromRGB(255, 120, 120)
         return
     end
+    
+    -- Create message content similar to image 3
+    local messageContent = string.format("A high-tier fish was caught by %s!", embedData.playerName or "someone")
+    if Config.UserID ~= "" then
+        messageContent = string.format("<@%s>\n%s", Config.UserID, messageContent)
+    end
+    
     local payload = {
-        username = "FishShit",
-        content  = (Config.UserID ~= "" and ("<@"..Config.UserID..">") or ""),
-        embeds   = {embedData},
+        content = messageContent,
+        embeds = {embedData}
     }
+    
     local json = HttpService:JSONEncode(payload)
-    local ok = http_post_json(Config.WebhookURL, json)
-    if ok then
+    
+    GUI.Status.Text = "Status: Sending webhook..."
+    GUI.Status.TextColor3 = Color3.fromRGB(255, 230, 120)
+    
+    local success, response = http_post_json(webhookUrl, json)
+    
+    if success then
         GUI.Status.Text = "Status: Webhook sent successfully!"
-        GUI.Status.TextColor3 = Color3.fromRGB(110,255,140)
+        GUI.Status.TextColor3 = Color3.fromRGB(110, 255, 140)
     else
-        GUI.Status.Text = "Status: Failed to send."
-        GUI.Status.TextColor3 = Color3.fromRGB(255,120,120)
+        GUI.Status.Text = "Status: Failed to send webhook"
+        GUI.Status.TextColor3 = Color3.fromRGB(255, 120, 120)
+        warn("[FishShit] Webhook failed:", response)
     end
 end
 
@@ -498,51 +824,54 @@ end
 -- =========================================================
 GUI.TestButton.MouseButton1Click:Connect(function()
     GUI.Status.Text = "Status: Testing Robot Kraken..."
-    GUI.Status.TextColor3 = Color3.fromRGB(255,230,120)
+    GUI.Status.TextColor3 = Color3.fromRGB(255, 230, 120)
 
-    local robot = {
-        Name  = "Robot Kraken",
-        Icon  = "rbxassetid://80927639907406",
-        Tier  = 7,
+    -- Robot Kraken data (from list.lua)
+    local robotKraken = {
+        Name = "Robot Kraken",
+        Icon = "rbxassetid://80927639907406",
+        Tier = 7,
         SellPrice = 327500,
-        WeightDefaultMin = 259820,
-        WeightDefaultMax = 389730,
-        Chance = 2.857142857142857e-07, -- ≈ 1 in 3,500,000
+        Probability = 2.857142857142857e-07
     }
-    local weight = math.random(robot.WeightDefaultMin, robot.WeightDefaultMax) / 1000
+    
+    -- Generate random weight similar to the real game
+    local weight = math.random(259820, 389730) / 1000
     local weightStr = string.format("%.2f kg", weight)
-    local rarityStr = "1 in "..fmt_int(math.max(1, math.floor(1/robot.Chance + 0.5)))
-    local iconUrl = asset_to_thumb_url(robot.Icon)
+    local rarityStr = prob_to_rarity_str(robotKraken.Probability)
 
-    local embed = build_embed({
+    -- Build embed data
+    local embedData = build_discord_embed({
         playerName = LP.DisplayName or LP.Name,
-        fishName   = robot.Name,
-        weightStr  = weightStr,
-        rarityStr  = rarityStr,
-        tierNumber = robot.Tier,
-        sellPrice  = robot.SellPrice,
-        iconUrl    = iconUrl,
-        totalCaught= nil,
-        bagSize    = nil,
+        fishName = robotKraken.Name,
+        fishIcon = robotKraken.Icon,
+        weightStr = weightStr,
+        rarityStr = rarityStr,
+        tierNumber = robotKraken.Tier,
+        sellPrice = robotKraken.SellPrice,
+        totalCaught = nil,
+        bagSize = nil
     })
 
     console_box({
         player = LP.DisplayName or LP.Name,
-        fish   = robot.Name,
+        fish = robotKraken.Name,
         weight = weightStr,
         rarity = rarityStr,
-        tier   = tier_name(robot.Tier),
-        price  = fmt_int(robot.SellPrice),
+        tier = tier_name(robotKraken.Tier),
+        price = fmt_int(robotKraken.SellPrice)
     })
 
-    send_webhook(embed)
+    send_webhook(embedData)
 end)
 
 -- =========================================================
 --  LIVE CHAT MONITOR
 -- =========================================================
 local function should_notify(tierNum)
-    for _,t in ipairs(Config.SelectedTiers) do if t==tierNum then return true end end
+    for _, t in ipairs(Config.SelectedTiers) do 
+        if t == tierNum then return true end 
+    end
     return false
 end
 
@@ -559,13 +888,13 @@ local function read_leaderstats_for(player)
     local stats = { totalCaught=nil, bagSize=nil }
     local ls = player:FindFirstChild("leaderstats")
     if ls then
-        for _,it in ipairs(ls:GetChildren()) do
-            local n = it.Name:lower()
-            if it.Value ~= nil then
-                if n:find("total") and n:find("caught") then
-                    stats.totalCaught = tonumber(it.Value)
-                elseif n:find("bag") and n:find("size") then
-                    stats.bagSize = tostring(it.Value)
+        for _, stat in ipairs(ls:GetChildren()) do
+            local statName = stat.Name:lower()
+            if stat.Value ~= nil then
+                if statName:find("total") and statName:find("caught") then
+                    stats.totalCaught = tonumber(stat.Value)
+                elseif statName:find("bag") and statName:find("size") then
+                    stats.bagSize = tostring(stat.Value)
                 end
             end
         end
@@ -573,34 +902,41 @@ local function read_leaderstats_for(player)
     return stats
 end
 
-local function process_msg(pName, fishName, weightStr, rarityStrFromChat)
-    local fish = getFishDataByName(fishName)
-    if not fish then return end
-    if not should_notify(fish.tier) then return end
+local function process_fish_catch(playerName, fishName, weightStr, rarityFromChat)
+    local fishData = getFishDataByName(fishName)
+    if not fishData then 
+        warn("[FishShit] Fish data not found for:", fishName)
+        return 
+    end
+    
+    if not should_notify(fishData.tier) then 
+        return 
+    end
 
-    local rarityStr = rarityStrFromChat or prob_to_rarity_str(fish.prob) or "Unknown"
-    local iconUrl   = asset_to_thumb_url(fish.icon or "")
-
+    local rarityStr = rarityFromChat or prob_to_rarity_str(fishData.prob) or "Unknown"
     local stats = read_leaderstats_for(LP)
-    local embed = build_embed({
-        playerName = pName,
-        fishName   = fish.name,
-        weightStr  = weightStr,
-        rarityStr  = rarityStr,
-        tierNumber = fish.tier,
-        sellPrice  = fish.sell or 0,
-        iconUrl    = iconUrl,
-        totalCaught= stats.totalCaught,
-        bagSize    = stats.bagSize,
-    })
+
+    local embedData = {
+        playerName = playerName,
+        fishName = fishData.name,
+        fishIcon = fishData.icon,
+        weightStr = weightStr,
+        rarityStr = rarityStr,
+        tierNumber = fishData.tier,
+        sellPrice = fishData.sell or 0,
+        totalCaught = stats.totalCaught,
+        bagSize = stats.bagSize
+    }
+
+    local embed = build_discord_embed(embedData)
 
     console_box({
-        player = pName,
-        fish   = fish.name,
+        player = playerName,
+        fish = fishData.name,
         weight = weightStr,
         rarity = rarityStr,
-        tier   = tier_name(fish.tier),
-        price  = fmt_int(tonumber(fish.sell or 0)),
+        tier = tier_name(fishData.tier),
+        price = fmt_int(tonumber(fishData.sell or 0)),
         totalCaught = stats.totalCaught and fmt_int(stats.totalCaught) or nil,
         bagSize = stats.bagSize
     })
@@ -608,7 +944,7 @@ local function process_msg(pName, fishName, weightStr, rarityStrFromChat)
     send_webhook(embed)
 end
 
--- hook classic chat UI
+-- Monitor chat for fish catches
 task.spawn(function()
     local chatGui = PG and PG:WaitForChild("Chat", 8)
     if not chatGui then return end
@@ -624,10 +960,16 @@ task.spawn(function()
         task.wait(0.1)
         local lbl = child:FindFirstChild("TextLabel")
         if lbl and lbl.Text then
-            local pName, fishName, w, r = parse_fish_message(lbl.Text)
-            if pName then process_msg(pName, fishName, w, r) end
+            local playerName, fishName, weight, rarity = parse_fish_message(lbl.Text)
+            if playerName then 
+                process_fish_catch(playerName, fishName, weight, rarity)
+            end
         end
     end)
 end)
 
-print("[FishShit] Notifier ready ✔  (uses list.lua from GitHub for icons/tiers/probabilities)")
+print("[FishShit] Enhanced Notifier ready ✔️")
+print("[FishShit] • Modern UI with smooth animations")
+print("[FishShit] • Discord embeds with fish icons") 
+print("[FishShit] • Draggable interface")
+print("[FishShit] Loading fish data from GitHub...")

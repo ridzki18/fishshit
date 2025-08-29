@@ -1,178 +1,227 @@
--- fisheet.lua
--- FishShit Notifier – Webhook Test Fixed
+-- fisheet.lua — FishShit Notifier (Fluent UI) — NO-HTTP thumbnail resolver
+-- Ikon diambil dari ReplicatedStorage.Items[Fish].(Data.)Icon -> dibentuk jadi URL asset-thumbnail (tanpa request).
+-- Tambah opsi CustomIconURL supaya bisa pakai gambar CDN kamu sendiri.
 
-----------------------------
--- CONFIG TEST (HARDCODE) --
-----------------------------
-local TEST_WEBHOOK = "https://discord.com/api/webhooks/1410933804805128263/sR-Bjsr7xuXrIfU2w6qqSXNnJB9z8Xnc_hPNbnLm6FzRn3GiRFjviL-eJsaZ7I9pMSNC"
-local TEST_USER_ID  = "905231281128898570"
+-- ====== DEPENDENCIES (Fluent) ======
+local Fluent = loadstring(game:HttpGet("https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"))()
+local SaveManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/dawid-scripts/Fluent/master/Addons/SaveManager.lua"))()
+local InterfaceManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/dawid-scripts/Fluent/master/Addons/InterfaceManager.lua"))()
 
--------------------------
--- SERVICES & HELPERS  --
--------------------------
-local HttpService = game:GetService("HttpService")
-local Players     = game:GetService("Players")
-local StarterGui  = game:GetService("StarterGui")
-local CoreGui     = game:GetService("CoreGui")
-local UIS         = game:GetService("UserInputService")
+-- ====== SERVICES ======
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local HttpService = game:GetService("HttpService") -- hanya untuk JSON payload ke Discord
+local LP = Players.LocalPlayer
+pcall(function() HttpService.HttpEnabled = true end)
 
--- Wrapper HTTP request: support executor (syn/fluxus/krnl) dan Roblox Studio
-local function getHttpRequest()
-    local req = (syn and syn.request) or (http and http.request) or (fluxus and fluxus.request) or (krnl and krnl.request) or request
-    if req then
-        return function(opts)
-            local res = req({ Url = opts.Url, Method = opts.Method or "GET", Headers = opts.Headers or {}, Body = opts.Body })
-            return { StatusCode = (res.StatusCode or res.Status or 0), Body = (res.Body or res.body or "") }
-        end
-    else
-        return function(opts)
-            local r = HttpService:RequestAsync({ Url = opts.Url, Method = opts.Method or "GET", Headers = opts.Headers or {}, Body = opts.Body })
-            return { StatusCode = r.StatusCode, Body = r.Body }
-        end
+-- ====== CONFIG ======
+local Config = {
+  WebhookURL      = "https://discord.com/api/webhooks/1410933804805128263/sR-Bjsr7xuXrIfU2w6qqSXNnJB9z8Xnc_hPNbnLm6FzRn3GiRFjviL-eJsaZ7I9pMSNC",
+  UserID          = "905231281128898570",
+  RetryAttempts   = 5,
+  RetryDelay      = 2,
+  -- Optional: kalau kamu isi dengan URL PNG sendiri, akan dipakai untuk SEMUA notifikasi
+  -- (paling aman kalau environment memblokir HTTP).
+  CustomIconURL   = "",  -- contoh: "https://raw.githubusercontent.com/ridzki18/fishshit/main/icons/robot_kraken.png"
+  FallbackIconURL = "https://raw.githubusercontent.com/github/explore/main/topics/fish/fish.png"
+}
+
+-- ====== UTILS ======
+local function fmt_int(n)
+  local s = tostring(math.floor(tonumber(n) or 0))
+  local k; repeat s,k = s:gsub("^(-?%d+)(%d%d%d)","%1,%2") until k==0; return s
+end
+
+-- Ambil assetId angka dari Items module
+local function get_asset_id_from_items(fishName)
+  local items = ReplicatedStorage:FindFirstChild("Items")
+  if not items then return nil end
+  local mod = items:FindFirstChild(fishName)
+  if not mod then return nil end
+  local ok, data = pcall(function() return require(mod) end)
+  if not ok or type(data) ~= "table" then return nil end
+  local icon = (data.Data and data.Data.Icon) or data.Icon
+  if not icon then return nil end
+  return tostring(icon):match("(%d+)")
+end
+
+-- Tanpa HTTP: bentuk URL roblox asset-thumbnail.
+local function build_asset_thumb_url(assetId)
+  if not assetId then return nil end
+  -- endpoint gambar yang umum dipakai (Discord sering bisa fetch ini)
+  return ("https://www.roblox.com/asset-thumbnail/image?assetId=%s&width=420&height=420&format=png"):format(assetId)
+end
+
+-- Resolver ikon TANPA HTTP external call: CustomIconURL > Items asset-thumbnail > Fallback
+local function resolve_icon_url_nohttp(fishName)
+  if type(Config.CustomIconURL) == "string" and Config.CustomIconURL:match("^https?://") and #Config.CustomIconURL > 8 then
+    print("[Icon] Using CustomIconURL:", Config.CustomIconURL)
+    return Config.CustomIconURL
+  end
+  local id = get_asset_id_from_items(fishName)
+  if id then
+    local url = build_asset_thumb_url(id)
+    print(("[Icon] Using asset-thumbnail for %s (id=%s): %s"):format(fishName, id, url))
+    return url
+  end
+  print("[Icon] Using FallbackIconURL:", Config.FallbackIconURL)
+  return Config.FallbackIconURL
+end
+
+-- Kirim payload ke Discord (boleh lewat request() dari executor, atau PostAsync)
+local function http_post_json(url, json)
+  if typeof(request) == "function" then
+    local ok,res = pcall(function()
+      return request({ Url=url, Method="POST", Headers={["Content-Type"]="application/json"}, Body=json })
+    end)
+    if ok and res and res.StatusCode and res.StatusCode>=200 and res.StatusCode<300 then return true,res.Body end
+    return false, res and (res.StatusMessage or res.StatusCode) or "request() failed"
+  else
+    local ok = pcall(function() HttpService:PostAsync(url, json, Enum.HttpContentType.ApplicationJson) end)
+    return ok
+  end
+end
+
+-- ====== EMBED BUILDER (gaya contoh #2) ======
+local TierName  = { [1]="Common",[2]="Uncommon",[3]="Rare",[4]="Epic",[5]="Legendary",[6]="Mythic",[7]="SECRET" }
+local TierColor = { [1]=0x9ea7b3,[2]=0x86c06c,[3]=0x3b82f6,[4]=0xa855f7,[5]=0xf59e0b,[6]=0xef4444,[7]=0x00ffd5 }
+
+local function build_embed(args)
+  local tier  = tonumber(args.tierNumber or 5) or 5
+  local color = TierColor[tier] or 0x3b82f6
+  local tname = TierName[tier] or tostring(tier)
+
+  return {
+    title = ("A high-tier fish was caught by %s!"):format(args.playerName or "-"),
+    color = color,
+    thumbnail = { url = args.iconUrl or "" },
+    image     = { url = args.iconUrl or "" }, -- kirim besar juga, kalau Discord mau tampilkan
+    fields = {
+      { name = "Fish Name 🐟", value = ("`%s`"):format(args.fishName or "-"), inline = false },
+      { name = "Weight ⚖️",    value = ("`%s`"):format(args.weightStr or "-"), inline = true },
+      { name = "Rarity ✨",    value = ("`%s`"):format(args.rarityStr or "-"), inline = true },
+      { name = "Tier 🏆",      value = ("`%s`"):format(tname), inline = true },
+      { name = "Sell Price 🪙",value = ("`%s`"):format(fmt_int(args.sellPrice or 0)), inline = true },
+    },
+    footer = { text = "FishShit Notifier" },
+    timestamp = DateTime.now():ToIsoDate(),
+  }
+end
+
+local function send_webhook(embed)
+  local payload = {
+    username   = "FishShit Notifier",
+    avatar_url = "https://i.imgur.com/9w3x9fN.png",
+    content    = (Config.UserID ~= "" and "<@"..Config.UserID..">") or nil,
+    allowed_mentions = { parse = {"users"} },
+    embeds     = { embed },
+  }
+  local body = HttpService:JSONEncode(payload)
+  for i=1,Config.RetryAttempts do
+    local ok = http_post_json(Config.WebhookURL, body)
+    if ok then return true end
+    task.wait(Config.RetryDelay)
+  end
+  return false
+end
+
+-- ====== FLUENT UI ======
+local Window = Fluent:CreateWindow({
+  Title="FishShit Notifier v4.0",
+  SubTitle="Discord Fish Catch Notifications",
+  TabWidth=160,
+  Size=UDim2.fromOffset(580,460),
+  Acrylic=true,
+  Theme="Dark",
+  MinimizeKey=Enum.KeyCode.LeftControl
+})
+
+local Tabs = {
+  Main    = Window:AddTab({ Title="Main Settings", Icon="settings" }),
+  Webhook = Window:AddTab({ Title="Webhook Config", Icon="globe" }),
+  Filters = Window:AddTab({ Title="Fish Filters", Icon="filter" }),
+  Status  = Window:AddTab({ Title="Status & Test", Icon="activity" })
+}
+
+-- Webhook & Icon override tab
+do
+  Tabs.Webhook:AddInput("WebhookURL",{Title="Discord Webhook URL",Default=Config.WebhookURL,Callback=function(v) Config.WebhookURL=v end})
+  Tabs.Webhook:AddInput("UserID",{Title="Discord User ID (optional)",Default=Config.UserID,Callback=function(v) Config.UserID=v end})
+  Tabs.Webhook:AddInput("CustomIconURL",{
+    Title="Custom Icon URL (optional, overrides thumbnail)",
+    Description="Isi dengan URL PNG/JPG untuk dipakai sebagai ikon.",
+    Default=Config.CustomIconURL,
+    Callback=function(v) Config.CustomIconURL=v end
+  })
+end
+
+-- Status & Test
+do
+  local StatusLabel = Tabs.Status:AddParagraph({ Title="System Status", Content="Ready." })
+
+  Tabs.Status:AddButton({
+    Title = " Test Webhook (Robot Kraken)",
+    Description = "Send styled embed + icon from Items/Robot Kraken (no HTTP resolver)",
+    Callback = function()
+      StatusLabel:SetDesc("Testing webhook with Robot Kraken…")
+
+      local fishName  = "Robot Kraken"
+      local tier      = 7
+      local sellPrice = 327500
+      local weightStr = string.format("%.2f kg", math.random(259820,389730)/1000)
+      local rarityStr = "1 in 3,500,000"
+
+      local iconUrl = resolve_icon_url_nohttp(fishName)
+      print("[FishShit] Using icon URL:", iconUrl)
+
+      local embed = build_embed({
+        playerName = LP.DisplayName or LP.Name,
+        fishName   = fishName,
+        weightStr  = weightStr,
+        rarityStr  = rarityStr,
+        tierNumber = tier,
+        sellPrice  = sellPrice,
+        iconUrl    = iconUrl
+      })
+
+      local ok = send_webhook(embed)
+      StatusLabel:SetDesc(ok and "✅ Webhook sent." or "❌ Webhook failed.")
     end
-end
-local httpRequest = getHttpRequest()
+  })
 
-local function notify(title, text, duration)
-    pcall(function() StarterGui:SetCore("SendNotification", { Title = title or "FishShit", Text = text or "", Duration = duration or 4 }) end)
-    print(string.format("[FishShit] %s - %s", tostring(title), tostring(text)))
-end
+  Tabs.Status:AddButton({
+    Title = " Debug Icon URL",
+    Description = "Print and send an embed showing the final icon URL used",
+    Callback = function()
+      local fishName = "Robot Kraken"
+      local url = resolve_icon_url_nohttp(fishName)
+      print("[Debug] Final icon URL:", url)
 
---------------------------------
--- CORE: SEND WEBHOOK (JSON)  --
---------------------------------
-local function sendWebhook(url, payload)
-    assert(type(url) == "string" and url:match("^https://discord%.com/api/webhooks/"), "Invalid Discord webhook URL")
-    local body = HttpService:JSONEncode(payload)
-    local ok, res = pcall(function()
-        return httpRequest({ Url = url, Method = "POST", Headers = { ["Content-Type"] = "application/json" }, Body = body })
-    end)
-    if not ok then return false, ("request pcall failed: %s"):format(tostring(res)) end
-    if not res then return false, "no response" end
-    local code = tonumber(res.StatusCode or 0) or 0
-    if code >= 200 and code < 300 then return true, ("HTTP %d OK"):format(code) end
-    return false, ("HTTP %d; body: %s"):format(code, tostring(res.Body))
-end
+      local embed = {
+        title = "[DEBUG] Icon "..fishName,
+        description = ("Resolved URL:\n`%s`"):format(url),
+        color = 0x00ffd5,
+        thumbnail = { url = url },
+        image     = { url = url },
+        footer = { text = "FishShit Notifier • Debug Thumbnail" },
+        timestamp = DateTime.now():ToIsoDate(),
+      }
 
-----------------------------
--- PUBLIC: TEST WEBHOOK   --
-----------------------------
-local function buildTestEmbed()
-    local player   = Players.LocalPlayer
-    local username = (player and player.Name) or "Unknown Player"
-    return {
-        ["title"]       = "🎣 Test Webhook - Robot Kraken",
-        ["description"] = "Notifikasi uji dari FishShit Notifier.",
-        ["color"]       = 3447003,
-        ["fields"]      = { { name = "Player", value = ("`%s`"):format(username), inline = true }, { name = "Mode", value = "`Test Only`", inline = true }, },
-        ["footer"]      = { ["text"] = "FishShit Notifier" },
-        ["timestamp"]   = os.date("!%Y-%m-%dT%H:%M:%SZ"),
-    }
-end
-
-local function TestWebhook()
-    notify("Testing Webhook", "Sending Robot Kraken test notification...", 3)
-    local payload = { content = "<@" .. TEST_USER_ID .. "> Test notification!", embeds = { buildTestEmbed() } }
-    local ok, info = sendWebhook(TEST_WEBHOOK, payload)
-    if ok then
-        notify("Webhook", "✅ Test terkirim", 4)
-        print("[FishShit] Test webhook sent:", info)
-    else
-        notify("Webhook", "❌ Gagal kirim (cek Output)", 6)
-        warn("[FishShit] Test webhook failed:", info)
+      local payload = {
+        username = "FishShit Notifier",
+        avatar_url = "https://i.imgur.com/9w3x9fN.png",
+        content = (Config.UserID ~= "" and "<@"..Config.UserID..">") or nil,
+        embeds = { embed }
+      }
+      local body = HttpService:JSONEncode(payload)
+      local ok
+      if typeof(request)=="function" then
+        local res = request({ Url=Config.WebhookURL, Method="POST", Headers={["Content-Type"]="application/json"}, Body=body })
+        ok = res and res.StatusCode and res.StatusCode>=200 and res.StatusCode<300
+      else
+        ok = pcall(function() HttpService:PostAsync(Config.WebhookURL, body, Enum.HttpContentType.ApplicationJson) end)
+      end
+      Fluent:Notify({ Title="Debug", Content= ok and "Sent debug embed." or "Failed to send debug embed.", Duration=4 })
     end
+  })
 end
-
-------------------------------------------------
--- OPTIONAL: SIMPLE UI (untuk jalankan langsung)
-------------------------------------------------
-local function ensureSimpleUI()
-    local guiName = "FishShitNotifierUI"
-    local root = CoreGui:FindFirstChild(guiName)
-    if not root then
-        root = Instance.new("ScreenGui")
-        root.Name = guiName
-        root.ResetOnSpawn = false
-        root.IgnoreGuiInset = true
-        root.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-        root.Parent = CoreGui
-    end
-
-    local frame = Instance.new("Frame")
-    frame.Name = "Window"
-    frame.BackgroundColor3 = Color3.fromRGB(28, 31, 40)
-    frame.Size = UDim2.fromOffset(420, 160)
-    frame.Position = UDim2.fromScale(0.5, 0.2)
-    frame.AnchorPoint = Vector2.new(0.5, 0)
-    frame.Parent = root
-    Instance.new("UICorner", frame).CornerRadius = UDim.new(0, 12)
-
-    local title = Instance.new("TextLabel")
-    title.Text = "FishShit Notifier – Status & Test"
-    title.Font = Enum.Font.GothamBold
-    title.TextSize = 18
-    title.TextColor3 = Color3.fromRGB(235, 240, 255)
-    title.BackgroundTransparency = 1
-    title.Position = UDim2.fromOffset(14, 10)
-    title.Size = UDim2.fromOffset(380, 24)
-    title.Parent = frame
-
-    -- draggable
-    local dragging, dragStart, startPos
-    frame.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 then
-            dragging = true
-            dragStart = input.Position
-            startPos = frame.Position
-        end
-    end)
-    frame.InputEnded:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 then
-            dragging = false
-        end
-    end)
-    UIS.InputChanged:Connect(function(input)
-        if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
-            local delta = input.Position - dragStart
-            frame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
-        end
-    end)
-
-    local btn = Instance.new("TextButton")
-    btn.Text = "🧪 Test Webhook (Robot Kraken)"
-    btn.Font = Enum.Font.Gotham
-    btn.TextSize = 16
-    btn.TextColor3 = Color3.fromRGB(20, 22, 28)
-    btn.BackgroundColor3 = Color3.fromRGB(115, 225, 160)
-    btn.Size = UDim2.fromOffset(380, 40)
-    btn.Position = UDim2.fromOffset(20, 60)
-    btn.Parent = frame
-    Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 8)
-    btn.MouseButton1Click:Connect(TestWebhook)
-
-    local note = Instance.new("TextLabel")
-    note.Text = "Config test hardcoded – hanya untuk pengujian."
-    note.Font = Enum.Font.Gotham
-    note.TextSize = 13
-    note.TextColor3 = Color3.fromRGB(180, 190, 210)
-    note.BackgroundTransparency = 1
-    note.Position = UDim2.fromOffset(20, 110)
-    note.Size = UDim2.fromOffset(380, 20)
-    note.Parent = frame
-end
-
-------------------------
--- MODULE / EXECUTION --
-------------------------
-local FishShit = {}
-FishShit.TestWebhook = TestWebhook
-FishShit.SendWebhook = sendWebhook
-
--- Jika skrip ini dieksekusi langsung (bukan require), tampilkan UI sederhana:
-local ranAsModule = false
-pcall(function() ranAsModule = (getfenv and getfenv(2) ~= nil) end)
-if not ranAsModule then
-    ensureSimpleUI()
-end
-
-return FishShit
